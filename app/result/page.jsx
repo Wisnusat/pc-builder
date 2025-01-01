@@ -4,27 +4,35 @@ import { useEffect, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { NavBar } from "@/components/views/navbar"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { 
-  Cpu, 
-  HardDrive, 
-  Box, 
-  Power,
-  MemoryStick,
-  CircuitBoard,
-  Microchip
-} from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
+import { Cpu, HardDrive, Box, Power, MemoryStick, CircuitBoard, MicroscopeIcon as Microchip, Copy } from 'lucide-react'
 import { useSearchParams } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import axiosInstance from "@/lib/axios"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 
+const CommentBubble = ({ userName, comment, createdAt, copiedBuild }) => (
+  <div className="bg-gray-100 rounded-lg p-3 mb-2">
+    <div className="font-semibold">{userName}</div>
+    <div>{comment}</div>
+    {copiedBuild && (
+      <div className="text-xs bg-gray-200 p-2 mt-2 rounded">
+        Ref Build: {copiedBuild}
+      </div>
+    )}
+    <div className="text-xs text-gray-500 mt-1">{createdAt}</div>
+  </div>
+)
+
 export default function Result() {
   const { toast } = useToast()
   const searchParams = useSearchParams()
   const budget = searchParams.get("budget")
-  const [question, setQuestion] = useState("")
   const [buildData, setBuildData] = useState(null)
+  const [comments, setComments] = useState(null)
+  const [newComments, setNewComments] = useState('')
+  const [copiedBuilds, setCopiedBuilds] = useState(null)
+  const [userData, setUserData] = useState(null)
 
   const getDataBuild = async () => {
     try {
@@ -38,9 +46,64 @@ export default function Result() {
     }
   }
 
+  const fetchComments = async (buildId) => {
+    try {
+      const response = await axiosInstance.get(`/api/forums/pc-build/${buildId}`);
+      setComments(response)
+      setNewComments('')
+      return;
+    } catch (error) {
+      console.log(error)
+      toast({ title: "Something went wrong", description: error.response.data.message, variant: "destructive" })
+    }
+  }
+
+  const handleCommentSubmit = async (pcBuild) => {
+    if (userData) {
+      if (newComments.trim() !== '') {
+        const newComment = {
+          user: userData,
+          comment: newComments,
+          pcBuild: pcBuild,
+          createdAt: new Date().toISOString().split('T')[0], // yyyy-mm-dd format
+          copiedBuild: copiedBuilds || null
+        }
+
+        try {
+          await axiosInstance.post(`/api/forums`, newComment);
+          toast({ title: "Comment posted" })
+          fetchComments(pcBuild.buildId)
+        } catch (error) {
+          console.log(error)
+          toast({ title: "Something went wrong", description: error.response.data.message, variant: "destructive" })
+        }
+        setNewComments('')
+      }
+    } else {
+      toast({ title: "Please login to post a comment", variant: "destructive" })
+    }
+  }
+
+  const copyBuildToClipboard = (build) => {
+    const buildText = build.components.map(component => 
+      `${component.category}: ${component.name}`
+    ).join(', ')
+    navigator.clipboard.writeText(buildText)
+    setCopiedBuilds(buildText)
+    toast({ title: "Build copied to clipboard" })
+  }
+
   useEffect(() => {
     getDataBuild()
   }, [budget])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const data = localStorage.getItem("userData")
+    if (data) {
+      setUserData(JSON.parse(data))
+    }
+  }, [])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -55,10 +118,35 @@ export default function Result() {
         {/* Components Grid */}
         <div className="space-y-4 mb-8">
           {buildData && buildData.map((component, i) => (
-            <Accordion type="single" collapsible key={i}>
+            <Accordion 
+              type="single" 
+              collapsible 
+              key={i}
+              onValueChange={(value) => {
+                if (value === 'item-1') {
+                  fetchComments(component.buildId)
+                }
+              }}
+            >
               <AccordionItem value="item-1">
-                <AccordionTrigger>{component.buildName} | Rp. {component.totalPrice.toLocaleString()}</AccordionTrigger>
+                <AccordionTrigger className="flex justify-between" onClick={() => fetchComments(component.buildId)}>
+                  <span>{component.buildName} | Rp. {component.totalPrice.toLocaleString()}</span>
+                </AccordionTrigger>
                 <AccordionContent>
+                  {component.components.length > 0 && (
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        copyBuildToClipboard(component)
+                      }}
+                      className="mb-2"
+                    >
+                      <Copy className="w-4 h-4 mr-2" />
+                      Copy
+                    </Button>
+                  )}
                   {component.components && component.components.map((item, index) => (
                     <Card key={index} className="hover:shadow-md transition-shadow mb-2">
                       <CardContent className="p-4">
@@ -87,28 +175,30 @@ export default function Result() {
                       </CardContent>
                     </Card>
                   ))}
+                  
+                  {/* Comments Section */}
+                  <div className="mt-4">
+                    <h3 className="font-semibold mb-2">Comments</h3>
+                    {comments && comments.map((comment, index) => (
+                      <CommentBubble key={index} {...comment} />
+                    ))}
+                    <Textarea
+                      value={newComments}
+                      onChange={(e) => setNewComments(e.target.value)}
+                      placeholder="Add a comment..."
+                      className="mb-2"
+                    />
+                    <Button 
+                      onClick={() => handleCommentSubmit(component)}
+                      className="bg-purple-600 hover:bg-purple-700 text-white"
+                    >
+                      Post Comment
+                    </Button>
+                  </div>
                 </AccordionContent>
               </AccordionItem>
             </Accordion>
           ))}
-        </div>
-
-        {/* Question Section */}
-        <div className="max-w-2xl mx-auto">
-          <div className="flex gap-4">
-            <Input
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              placeholder="Masukan pertanyaan"
-              className="flex-grow"
-            />
-            <Button 
-              className="bg-purple-600 hover:bg-purple-700 text-white"
-              onClick={() => {/* Handle send to forum */}}
-            >
-              Send to forum
-            </Button>
-          </div>
         </div>
       </main>
     </div>
